@@ -1,7 +1,7 @@
 # all aoutoencoder classes are here
 import numpy as np
-import tensorflow as tf
-
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 ###############################  MLP of Table 1 ###############################
 class AE_MLP(object):
@@ -105,6 +105,11 @@ class AE_MLP(object):
         ebno = 10**(ebnodb/10)
         return 1/np.sqrt(2*self.bits_per_symbol*ebno) 
     
+    def PSR2sigma(self, psr_db):
+        '''Convert P/eb in dB to p standard deviation'''
+        ps = 10**(psr_db/10)
+        return 1/np.sqrt(2*self.bits_per_symbol*ps) 
+    
     def gen_feed_dict(self, perturbation, batch_size, ebnodb, lr):
         '''Generate a feed dictionary for training and validation'''        
         return {
@@ -187,6 +192,39 @@ class AE_MLP(object):
             BLER_jamming = BLER_jamming + bler_jamming/iterations
         return BLER_no_attack, BLER_adv_attack, BLER_jamming
 
+    def bler_sim_attack_AWGN_proposed(self, p1, p2 , PSR_dB, ebnodbs, batch_size, iterations):
+        '''Generate the BLER for 4 cases: 1) no attack, 2) adversarial attack, 3) jamming attack, and 4) ea attack'''
+        np.random.seed(seed=self.seed)
+        PSR = 10**(PSR_dB/10)
+        scale_factor = np.sqrt( (PSR * self.n) / (np.linalg.norm(p1)**2 +  0.00000001) ) # 
+        p1 = scale_factor * p1
+        scale_factor = np.sqrt( (PSR * self.n) / (np.linalg.norm(p2)**2 +  0.00000001) ) # 
+        p2 = scale_factor * p2
+        BLER_no_attack = np.zeros_like(ebnodbs)
+        BLER_adv_attack = np.zeros_like(ebnodbs)
+        BLER_jamming = np.zeros_like(ebnodbs)
+        BLER_ea = np.zeros_like(ebnodbs)
+        for i in range(iterations):
+            # No attack - clean case
+            bler = np.array([self.sess.run(self.vars['bler'],
+                            feed_dict=self.gen_feed_dict(np.zeros([1,2,self.n]), batch_size, ebnodb, lr=0)) for ebnodb in ebnodbs]) #bler = np.array([self.sess.run(self.vars['bler'],feed_dict=self.gen_feed_dict(p, batch_size, ebnodb, lr=0)) for ebnodb in ebnodbs])
+            BLER_no_attack = BLER_no_attack + bler/iterations
+            # adversarial attack
+            bler_attack = np.array([self.sess.run(self.vars['bler'],
+                            feed_dict=self.gen_feed_dict(  p1 ,batch_size, ebnodb, lr=0)) for ebnodb in ebnodbs]) # I think lr=0 is equal to is_training=False
+            BLER_adv_attack = BLER_adv_attack + bler_attack/iterations
+            # Jamming attack
+            normal_noise_as_jammer = np.random.normal(0,1,p1.shape)
+            jamming = np.linalg.norm(p1) * (1 / np.linalg.norm(normal_noise_as_jammer)) * normal_noise_as_jammer
+            bler_jamming= np.array([self.sess.run(self.vars['bler'],
+                            feed_dict=self.gen_feed_dict(jamming,batch_size, ebnodb, lr=0)) for ebnodb in ebnodbs]) # I think lr=0 is equal to is_training=False
+            BLER_jamming = BLER_jamming + bler_jamming/iterations
+
+            # EA attack
+            bler_attack = np.array([self.sess.run(self.vars['bler'],
+                            feed_dict=self.gen_feed_dict(  p2 ,batch_size, ebnodb, lr=0)) for ebnodb in ebnodbs]) # I think lr=0 is equal to is_training=False
+            BLER_adv_attack = BLER_adv_attack + bler_attack/iterations
+        return BLER_no_attack, BLER_adv_attack, BLER_jamming
 
     def fgm_attack(self,s,p, ebnodb): #in_img,in_label,num_class
         '''Create an input specific adversarial example using the method proposed by Sadeghi and Larsson in [2] '''
@@ -225,8 +263,6 @@ class AE_MLP(object):
         adv_perturbation = minimum_epsilon * norm_adv_dirc
         return adv_perturbation, false_cls, minimum_epsilon
 
-    
-        
     def UAPattack_fgm(self,ebnodb,num_samples,PSR_dB):
         '''Create a Universal Adversarial Perturbation as suggested by Alg. 1 of Sadeghi et al in [2]'''
         np.random.seed(seed=self.seed)
@@ -247,6 +283,88 @@ class AE_MLP(object):
                 else:
                     universal_per_fgm =  Epsilon_uni * (universal_per_fgm + adv_perturbn_reshaped) 
         return universal_per_fgm
+    
+
+    # EA BASED
+
+    def Crossover1(self, parent1, parent2):
+        child = np.zeros([1,2,self.n])
+        point1 = np.random.randint(0, self.n -2, dtype= int)
+        point2 = np.random.randint(point1, self.n -1, dtype= int)
+
+        for i in range(point1):
+            child[0][0][i] = parent1[0][0][i]
+            child[0][1][i] = parent1[0][1][i]
+
+        for i in range(point1, point2):
+            child[0][0][i] = parent2[0][0][i]
+            child[0][1][i] = parent2[0][1][i]
+
+        for i in range(point2, self.n):
+            child[0][0][i] = parent1[0][0][i]
+            child[0][1][i] = parent1[0][1][i]
+        return child
+    
+    def Mutation1(self, parent):
+        child = np.zeros([1,2,self.n])
+        point = np.random.randint(0, self.n -1, dtype= int)
+
+        for i in range(point):
+            child[0][0][i] = parent[0][0][point-i-1]
+            child[0][1][i] = parent[0][1][point-i-1]
+
+        for i in range(point, self.n):
+            child[0][0][i] = parent[0][0][self.n+ point-i-1]
+            child[0][1][i] = parent[0][1][self.n+ point-i-1]
+
+        return child
+
+    def fitness(self, individual, ebnodb):
+        res = 0
+        for i in range(16):
+            s =  np.asarray([np.floor(np.random.uniform(0,16,1))]).reshape(1) 
+            predicted_label = np.argmax(self.sess.run(self.vars['s_hat'], feed_dict={self.vars['s']:s, self.vars['p']:individual, self.vars['noise_std']: self.EbNo2Sigma(ebnodb)}) )
+            if predicted_label != s:
+                res+=1
+        return res
+    
+    def EAbasedAttack(self, ebnodb, num_samples, PSR_dB):
+        '''Create a EAbased Adversarial Perturbation as suggested by Alg. 1 of Sadeghi et al in [2]'''
+        np.random.seed(seed=self.seed)
+        universal_per_eab = np.zeros([1,2,self.n])
+        population = []
+        POPSIZE = 50
+        CROSSRATE = 0.8
+        MUTATIONRATE = 0.2
+        MAXGENERATION = 100
+        
+        # Initialization
+        #to-do
+        for i in range(POPSIZE-1):
+            individual = tf.random_normal([1,2,self.n], mean=0.0, stddev= self.PSR2sigma(PSR_dB), seed=self.seed)
+            population.append(individual)
+        population.append(self.UAPattack_fgm(ebnodb,num_samples,PSR_dB))
+
+        # Main loop
+        for iteration in range(MAXGENERATION):
+            for indi_index in range(POPSIZE):
+                parent1 = population[indi_index]
+
+                # Crossover
+                if (np.random.uniform() < CROSSRATE):
+                    p2_index = np.random.randint(0, POPSIZE-1)
+                    parent2 = population[p2_index]
+                    population.append[self.Crossover1(parent1, parent2)]
+
+                # Mutation
+                if (np.random.uniform() < MUTATIONRATE):
+                    population.append[self.Mutation1(parent1)]
+
+            population.sort(key = -self.fitness)
+            population = population[0:POPSIZE-1]
+
+        universal_per_eab = population[0]
+        return universal_per_eab
 
 
 ###############################  CNN of Table 1 ###############################
@@ -1134,5 +1252,3 @@ class AE_inf_rate(object):
                 else:
                     universal_per_fgm =  Epsilon_uni * (universal_per_fgm + adv_perturbn_reshaped) 
         return universal_per_fgm
-
-
