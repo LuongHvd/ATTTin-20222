@@ -203,7 +203,7 @@ class AE_MLP(object):
         BLER_no_attack = np.zeros_like(ebnodbs)
         BLER_adv_attack = np.zeros_like(ebnodbs)
         BLER_jamming = np.zeros_like(ebnodbs)
-        BLER_ea = np.zeros_like(ebnodbs)
+        BLER_eab_attack = np.zeros_like(ebnodbs)
         for i in range(iterations):
             # No attack - clean case
             bler = np.array([self.sess.run(self.vars['bler'],
@@ -223,8 +223,8 @@ class AE_MLP(object):
             # EA attack
             bler_attack = np.array([self.sess.run(self.vars['bler'],
                             feed_dict=self.gen_feed_dict(  p2 ,batch_size, ebnodb, lr=0)) for ebnodb in ebnodbs]) # I think lr=0 is equal to is_training=False
-            BLER_adv_attack = BLER_adv_attack + bler_attack/iterations
-        return BLER_no_attack, BLER_adv_attack, BLER_jamming
+            BLER_eab_attack = BLER_eab_attack + bler_attack/iterations
+        return BLER_no_attack, BLER_adv_attack, BLER_jamming, BLER_eab_attack
 
     def fgm_attack(self,s,p, ebnodb): #in_img,in_label,num_class
         '''Create an input specific adversarial example using the method proposed by Sadeghi and Larsson in [2] '''
@@ -341,9 +341,9 @@ class AE_MLP(object):
         # Initialization
         #to-do
         for i in range(POPSIZE-1):
-            individual = tf.random_normal([1,2,self.n], mean=0.0, stddev= self.PSR2sigma(PSR_dB), seed=self.seed)
+            individual = np.random.normal(0,self.PSR2sigma(PSR_dB),universal_per_eab.shape) # tf.random_normal([1,2,self.n], mean=0.0, stddev= self.PSR2sigma(PSR_dB), seed=self.seed)
             population.append(individual)
-        population.append(self.UAPattack_fgm(ebnodb,num_samples,PSR_dB))
+        population.append(self.UAPattack_fgm(ebnodb,num_samples,PSR_dB).reshape(1,2,self.n))
 
         # Main loop
         for iteration in range(MAXGENERATION):
@@ -354,11 +354,11 @@ class AE_MLP(object):
                 if (np.random.uniform() < CROSSRATE):
                     p2_index = np.random.randint(0, POPSIZE-1)
                     parent2 = population[p2_index]
-                    population.append[self.Crossover1(parent1, parent2)]
+                    population.append[self.Crossover1(parent1, parent2).reshape(1,2,self.n)]
 
                 # Mutation
                 if (np.random.uniform() < MUTATIONRATE):
-                    population.append[self.Mutation1(parent1)]
+                    population.append[self.Mutation1(parent1).reshape(1,2,self.n)]
 
             population.sort(key = -self.fitness)
             population = population[0:POPSIZE-1]
