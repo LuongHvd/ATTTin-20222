@@ -337,7 +337,7 @@ class AE_MLP(object):
         for i in range(point2, self.n):
             child[0][0][i] = parent1[0][0][i]
             child[0][1][i] = parent1[0][1][i]
-        return self.normalize(child)
+        return child
     
     def Crossover2(self, parent1, parent2):
         child = np.zeros([1,2,self.n], dtype=float)
@@ -355,7 +355,7 @@ class AE_MLP(object):
         for i in range(point2, self.n):
             child[0][0][i] = parent2[0][0][i]
             child[0][1][i] = parent2[0][1][i]
-        return self.normalize(child)
+        return child
     
     def Mutation1(self, parent):
         child = np.zeros([1,2,self.n])
@@ -367,7 +367,7 @@ class AE_MLP(object):
         for i in range(point, self.n):
             child[0][0][i] = parent[0][0][self.n+ point-i-1]
             child[0][1][i] = parent[0][1][self.n+ point-i-1]
-        return self.normalize(child)
+        return child
     
     def Mutation2(self, parent):
         child = np.zeros([1,2,self.n], dtype=float)
@@ -387,7 +387,7 @@ class AE_MLP(object):
         for i in range(point2, self.n):
             child[0][0][i] = parent[0][0][i]
             child[0][1][i] = parent[0][1][i]
-        return self.normalize(child)
+        return child
 
     def fitness(self, individual, ebnodb):
         res = 0
@@ -412,12 +412,15 @@ class AE_MLP(object):
         MAXGENERATION = 250
         
         # Initialization
-        #to-do
         population.append(self.UAPattack_fgm(ebnodb,num_samples,PSR_dB))
-        for i in range(POPSIZE-1):
+        for i in range(int(POPSIZE/2)):
             # individual = tf.random_normal([1,2,self.n], mean=0.0, stddev= self.PSR2sigma(PSR_dB), seed=self.seed)
             individual = np.random.normal(loc=0.0, scale=self.PSR2sigma(PSR_dB), size=(1, 2, self.n))
-            population.append(individual)
+            population.append(self.normalize(individual,PSR_dB))
+        
+        for i in range(int(POPSIZE/2)-1):
+            individual = np.random.uniform(-1, 1, size=(1, 2, self.n))
+            population.append(self.normalize(individual, PSR_dB))
 
         # Main loop
         for iteration in range(MAXGENERATION):
@@ -428,13 +431,13 @@ class AE_MLP(object):
                 if (np.random.uniform() < CROSSRATE):
                     p2_index = np.random.randint(0, POPSIZE-1)
                     parent2 = population[p2_index]
-                    population.append(self.Crossover1(parent1, parent2))
-                    population.append(self.Crossover2(parent1, parent2))
+                    population.append(self.normalize(self.Crossover1(parent1, parent2), PSR_dB))
+                    population.append(self.normalize(self.Crossover2(parent1, parent2), PSR_dB))
 
                 # Mutation
                 if (np.random.uniform() < MUTATIONRATE):
-                    population.append(self.Mutation1(parent1))
-                    population.append(self.Mutation2(parent1))
+                    population.append(self.normalize(self.Mutation1(parent1), PSR_dB))
+                    population.append(self.normalize(self.Mutation2(parent1),PSR_dB))
 
             # population.sort(key = -self.fitness)
             population.sort(key = lambda x: -self.fitness(x, ebnodb))
