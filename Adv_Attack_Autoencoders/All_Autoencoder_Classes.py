@@ -337,7 +337,25 @@ class AE_MLP(object):
         for i in range(point2, self.n):
             child[0][0][i] = parent1[0][0][i]
             child[0][1][i] = parent1[0][1][i]
-        return child
+        return self.normalize(child)
+    
+    def Crossover2(self, parent1, parent2):
+        child = np.zeros([1,2,self.n], dtype=float)
+        point1 = np.random.randint(0, self.n/3, dtype= int)
+        point2 = np.random.randint(point1, self.n -1, dtype= int)
+
+        for i in range(point1):
+            child[0][0][i] = parent1[0][0][i]
+            child[0][1][i] = parent1[0][1][i]
+
+        for i in range(point1, point2):
+            child[0][0][i] = (parent2[0][0][i] + parent1[0][0][i])/2
+            child[0][1][i] = (parent2[0][1][i] + parent1[0][0][i])/2
+
+        for i in range(point2, self.n):
+            child[0][0][i] = parent2[0][0][i]
+            child[0][1][i] = parent2[0][1][i]
+        return self.normalize(child)
     
     def Mutation1(self, parent):
         child = np.zeros([1,2,self.n])
@@ -346,12 +364,30 @@ class AE_MLP(object):
         for i in range(point):
             child[0][0][i] = parent[0][0][point-i-1]
             child[0][1][i] = parent[0][1][point-i-1]
-
         for i in range(point, self.n):
             child[0][0][i] = parent[0][0][self.n+ point-i-1]
             child[0][1][i] = parent[0][1][self.n+ point-i-1]
+        return self.normalize(child)
+    
+    def Mutation2(self, parent):
+        child = np.zeros([1,2,self.n], dtype=float)
+        point1 = np.random.randint(0, self.n/3, dtype= int)
+        point2 = np.random.randint(point1, self.n -1, dtype= int)
 
-        return child
+        for i in range(point1):
+            child[0][0][i] = parent[0][0][i]
+            child[0][1][i] = parent[0][1][i]
+
+        for i in range(point1, point2):
+            x = parent[0][0][i]
+            y = parent[0][1][i]
+            child[0][0][i] = 1 + x + x*x + x*x*x
+            child[0][1][i] = 1 + y + y*y + y*y*y
+
+        for i in range(point2, self.n):
+            child[0][0][i] = parent[0][0][i]
+            child[0][1][i] = parent[0][1][i]
+        return self.normalize(child)
 
     def fitness(self, individual, ebnodb):
         res = 0
@@ -362,6 +398,9 @@ class AE_MLP(object):
                 res+=1
         return res
     
+    def normalize(self, individual, PSR_dB):
+        return np.sqrt(self.PSR2sigma(PSR_dB))/ np.absolute(individual) * individual
+    
     def EAbasedAttack(self, ebnodb, num_samples, PSR_dB):
         '''Create a EAbased Adversarial Perturbation as suggested by Alg. 1 of Sadeghi et al in [2]'''
         np.random.seed(seed=self.seed)
@@ -370,7 +409,7 @@ class AE_MLP(object):
         POPSIZE = 50
         CROSSRATE = 0.8
         MUTATIONRATE = 0.2
-        MAXGENERATION = 100
+        MAXGENERATION = 250
         
         # Initialization
         #to-do
@@ -390,18 +429,21 @@ class AE_MLP(object):
                     p2_index = np.random.randint(0, POPSIZE-1)
                     parent2 = population[p2_index]
                     population.append(self.Crossover1(parent1, parent2))
+                    population.append(self.Crossover2(parent1, parent2))
 
                 # Mutation
                 if (np.random.uniform() < MUTATIONRATE):
                     population.append(self.Mutation1(parent1))
+                    population.append(self.Mutation2(parent1))
 
             # population.sort(key = -self.fitness)
             population.sort(key = lambda x: -self.fitness(x, ebnodb))
             population = population[0:POPSIZE-1]
 
+        population.append[universal_per_eab]
+        population.sort(key = lambda x: -self.fitness(x, ebnodb))
         universal_per_eab = population[0]
         return universal_per_eab
-
 
 ###############################  CNN of Table 1 ###############################
 class AE_CNN(object):
