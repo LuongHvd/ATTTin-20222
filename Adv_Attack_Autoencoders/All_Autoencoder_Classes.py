@@ -108,7 +108,7 @@ class AE_MLP(object):
     def PSR2sigma(self, psr_db):
         '''Convert P/eb in dB to p standard deviation'''
         ps = 10**(psr_db/10)
-        return 1/np.sqrt(2*self.bits_per_symbol*ps) 
+        return np.sqrt(2*self.bits_per_symbol*ps) 
     
     def gen_feed_dict(self, perturbation, batch_size, ebnodb, lr):
         '''Generate a feed dictionary for training and validation'''        
@@ -399,7 +399,14 @@ class AE_MLP(object):
         return res
     
     def normalize(self, individual, PSR_dB):
-        return np.sqrt(self.PSR2sigma(PSR_dB))/ np.absolute(individual) * individual
+        PSR = 10**(PSR_dB/10)
+        scale_factor = np.sqrt( (PSR * self.n) / (np.linalg.norm(individual)**2 +  0.00000001) ) # 
+        # energy = 0
+        # for i in range(self.n):
+        #     x = individual[0][0][i]
+        #     y = individual[0][1][i]
+        #     energy += x*x + y*y
+        return scale_factor * individual
     
     def EAbasedAttack(self, ebnodb, num_samples, PSR_dB):
         '''Create a EAbased Adversarial Perturbation as suggested by Alg. 1 of Sadeghi et al in [2]'''
@@ -443,9 +450,9 @@ class AE_MLP(object):
             population.sort(key = lambda x: -self.fitness(x, ebnodb))
             population = population[0:POPSIZE-1]
 
-        population.append[universal_per_eab]
+        population.append(self.UAPattack_fgm(ebnodb,num_samples,PSR_dB))
         population.sort(key = lambda x: -self.fitness(x, ebnodb))
-        universal_per_eab = population[0]
+        universal_per_eab = self.normalize(population[0],PSR_dB)
         return universal_per_eab
 
 ###############################  CNN of Table 1 ###############################
