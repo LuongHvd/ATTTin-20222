@@ -322,22 +322,29 @@ class AE_MLP(object):
     # EA BASED
 
     def Crossover1(self, parent1, parent2):
-        child = np.zeros([1,2,self.n], dtype=float)
+        child1 = np.zeros([1,2,self.n], dtype=float)
+        child2 = np.zeros([1,2,self.n], dtype=float)
         point1 = np.random.randint(0, self.n -2, dtype= int)
         point2 = np.random.randint(point1, self.n -1, dtype= int)
 
         for i in range(point1):
-            child[0][0][i] = parent1[0][0][i]
-            child[0][1][i] = parent1[0][1][i]
+            child1[0][0][i] = parent1[0][0][i]
+            child1[0][1][i] = parent1[0][1][i]
+            child2[0][0][i] = parent2[0][0][i]
+            child2[0][1][i] = parent2[0][1][i]
 
         for i in range(point1, point2):
-            child[0][0][i] = parent2[0][0][i]
-            child[0][1][i] = parent2[0][1][i]
+            child1[0][0][i] = parent2[0][0][i]
+            child1[0][1][i] = parent2[0][1][i]
+            child2[0][0][i] = parent1[0][0][i]
+            child2[0][1][i] = parent1[0][1][i]
 
         for i in range(point2, self.n):
-            child[0][0][i] = parent1[0][0][i]
-            child[0][1][i] = parent1[0][1][i]
-        return child
+            child1[0][0][i] = parent1[0][0][i]
+            child1[0][1][i] = parent1[0][1][i]
+            child2[0][0][i] = parent2[0][0][i]
+            child2[0][1][i] = parent2[0][1][i]
+        return child1, child2
     
     def Crossover2(self, parent1, parent2):
         child = np.zeros([1,2,self.n], dtype=float)
@@ -378,6 +385,7 @@ class AE_MLP(object):
             child[0][0][i] = parent[0][0][i]
             child[0][1][i] = parent[0][1][i]
 
+
         for i in range(point1, point2):
             x = parent[0][0][i]
             y = parent[0][1][i]
@@ -409,7 +417,7 @@ class AE_MLP(object):
         return scale_factor * individual
     
     def EAbasedAttack(self, ebnodb, num_samples, PSR_dB):
-        '''Create a EAbased Adversarial Perturbation as suggested by Alg. 1 of Sadeghi et al in [2]'''
+        '''Create a EAbased Adversarial Perturbation as suggested'''
         np.random.seed(seed=self.seed)
         universal_per_eab = np.zeros([1,2,self.n])
         population = []
@@ -438,7 +446,9 @@ class AE_MLP(object):
                 if (np.random.uniform() < CROSSRATE):
                     p2_index = np.random.randint(0, POPSIZE-1)
                     parent2 = population[p2_index]
-                    population.append(self.normalize(self.Crossover1(parent1, parent2), PSR_dB))
+                    child1, child2 =  self.Crossover1(parent1, parent2)
+                    population.append(self.normalize(child1, PSR_dB))
+                    population.append(self.normalize(child2, PSR_dB))
                     population.append(self.normalize(self.Crossover2(parent1, parent2), PSR_dB))
 
                 # Mutation
@@ -453,7 +463,69 @@ class AE_MLP(object):
         population.append(self.UAPattack_fgm(ebnodb,num_samples,PSR_dB))
         population.sort(key = lambda x: -self.fitness(x, ebnodb))
         universal_per_eab = self.normalize(population[0],PSR_dB)
+
         return universal_per_eab
+
+
+    #### Differential Evolution
+    def DEbasedAttack(self, ebnodb, num_samples, PSR_dB):
+        '''Create a DEbased Adversarial Perturbation'''
+        np.random.seed(seed=self.seed)
+        universal_per_deb = np.zeros([1,2,self.n])
+        population = []
+        POPSIZE = 50
+        CROSSRATE = 0.8
+        MUTATIONRATE = 0.2
+        MAXGENERATION = 250
+        F=0.1
+
+        #Initialization
+        population.append(self.UAPattack_fgm(ebnodb,num_samples,PSR_dB))
+        for i in range(int(POPSIZE/2)):
+            # individual = tf.random_normal([1,2,self.n], mean=0.0, stddev= self.PSR2sigma(PSR_dB), seed=self.seed)
+            individual = np.random.normal(loc=0.0, scale=self.PSR2sigma(PSR_dB), size=(1, 2, self.n))
+            population.append(self.normalize(individual,PSR_dB))
+        
+        for i in range(int(POPSIZE/2)-1):
+            individual = np.random.uniform(-1, 1, size=(1, 2, self.n))
+            population.append(self.normalize(individual, PSR_dB))
+
+        for iteration in range(MAXGENERATION):
+            for indi_index in range(POPSIZE):
+                Ik = population[indi_index]
+
+                I1 = population[np.random.randint(0,POPSIZE)]
+                I2 = population[np.random.randint(0,POPSIZE)]
+                I3 = population[np.random.randint(0,POPSIZE)]
+                
+                Vk = np.zeros([1,2,self.n], dtype=float)
+                for i in range(self.n):
+                    Vk[0][0][i] = I1[0][0][i] + F*(I2[0][0][i] - I3[0][0][i])
+                    Vk[0][1][i] = I1[0][1][i] + F*(I2[0][1][i] - I3[0][1][i])
+                    
+                Vk = self.normalize(Vk, PSR_dB)
+                
+                Ok = np.zeros([1,2,self.n], dtype=float)
+                j = np.random.randint(0, self.n)
+    
+                for i in range(self.n):
+                    if np.random.rand() < CROSSRATE or i == j:
+                        Ok[0][0][i] = Vk[0][0][i]
+                        Ok[0][1][i] = Vk[0][1][i]
+                    else:
+                        Ok[0][0][i] = Ik[0][0][i]
+                        Ok[0][1][i] = Ik[0][1][i]
+                        
+                Ok = self.normalize(Ok, PSR_dB)
+                if self.fitness(Ok, ebnodb) > self.fitness(Ik, ebnodb):
+                    population[indi_index] = Ok
+                    
+        population.append(self.UAPattack_fgm(ebnodb,num_samples,PSR_dB))
+        population.sort(key = lambda x: -self.fitness(x, ebnodb))
+        universal_per_deb = self.normalize(population[0],PSR_dB)
+
+        return universal_per_deb
+
 
 ###############################  CNN of Table 1 ###############################
 class AE_CNN(object):
@@ -550,7 +622,7 @@ class AE_CNN(object):
                              activation=tf.nn.relu, use_bias=True,
                              kernel_initializer=tf.glorot_uniform_initializer(seed=None, dtype=tf.float32),
                              trainable=True)
-        flattened0 = tf.contrib.layers.flatten(conv0)
+        flattened0 = tf.layers.flatten(conv0)
         x = tf.layers.dense(flattened0, 2*self.n, activation=None)
         x = tf.reshape(x, shape=[-1,2,self.n]) 
         #Average power normalization
@@ -569,7 +641,7 @@ class AE_CNN(object):
                              kernel_initializer=tf.glorot_uniform_initializer(seed=None, dtype=tf.float32),
                              trainable=True)
         drout = tf.layers.dropout(conv2, rate=dr_out, noise_shape=None, training=is_training, name='dropou1')
-        flattened = tf.contrib.layers.flatten(drout)
+        flattened = tf.layers.flatten(drout)
         dense1 = tf.layers.dense(flattened, 2*self.M, activation=tf.nn.relu)
         y = tf.layers.dense(dense1, self.M, activation=None)
         return y
@@ -639,15 +711,19 @@ class AE_CNN(object):
         return tf.Variable(tf.random_uniform(shape, minval=low, maxval=high, dtype=tf.float32))
     
     
-    def bler_sim_attack_AWGN(self, is_training, dr_out , p, PSR_dB, ebnodbs, batch_size, iterations):
+    def bler_sim_attack_AWGN(self, is_training, dr_out , p, p_eab, PSR_dB, ebnodbs, batch_size, iterations):
         '''Generate the BLER for 4 cases: 1) no attack, 2) synchronous adversarial attack, 3) non-synchronous adversarial attack and 4) jamming attack'''
         PSR = 10**(PSR_dB/10)
         scale_factor = np.sqrt( (PSR * self.n) / (np.linalg.norm(p)**2 + 0.00000001) ) # note that self.n is the power of the x, as designed by Jakob
         p = scale_factor * p
+
+        scale_factor = np.sqrt( (PSR * self.n) / (np.linalg.norm(p_eab)**2 + 0.00000001) )
+        p_eab = scale_factor * p_eab
         
         BLER_no_attack = np.zeros_like(ebnodbs)
         BLER_attack_rolled = np.zeros_like(ebnodbs)
         BLER_jamming = np.zeros_like(ebnodbs)
+        BLER_attack_rolled_eab = np.zeros_like(ebnodbs)
 
         for i in range(iterations):
             # No attack - clean case
@@ -665,7 +741,13 @@ class AE_CNN(object):
             bler_jamming= np.array([self.sess.run(self.vars['bler'],
                             feed_dict=self.gen_feed_dict(is_training, dr_out, jamming,batch_size, ebnodb, lr=0)) for ebnodb in ebnodbs]) # I think lr=0 is equal to is_training=False
             BLER_jamming = BLER_jamming + bler_jamming/iterations
-        return BLER_no_attack, BLER_attack_rolled, BLER_jamming
+            
+            # EAB attack
+            p_rolled_eab = np.roll(p_eab, int(np.ceil(np.random.uniform(0,self.n))))
+            bler_attack_rolled_eab = np.array([self.sess.run(self.vars['bler'],
+                            feed_dict=self.gen_feed_dict(is_training, dr_out ,p_rolled_eab,batch_size, ebnodb, lr=0)) for ebnodb in ebnodbs]) # I think lr=0 is equal to is_training=False
+            BLER_attack_rolled_eab = BLER_attack_rolled_eab + bler_attack_rolled_eab/iterations
+        return BLER_no_attack, BLER_attack_rolled, BLER_jamming, BLER_attack_rolled_eab
     
     
     
